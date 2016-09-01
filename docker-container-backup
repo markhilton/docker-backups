@@ -1,0 +1,79 @@
+#!/bin/bash
+
+## verify if environment file exist
+cd "$(dirname "$0")"
+
+if [ ! -f .env ]; then echo 'ERROR: missing .env file'; exit 0; fi
+
+## load environment variables
+. ./.env
+
+echo ''
+
+## verify if required environment variables exist
+if [ -z ${S3_BUCKET+x} ]  ; then echo "ERROR: S3_BUCKET is not set.    Aborting."; exit 1; fi
+if [ -z ${GC_BUCKET+x} ]  ; then echo "ERROR: GC_BUCKET is not set.    Aborting."; exit 1; fi
+if [ -z ${SERVICE+x} ]    ; then echo "ERROR: SERVICE is not set.      Aborting."; exit 1; fi
+if [ -z ${TMP_STORAGE+x} ]; then echo "ERROR: TMP_STORAGE is not set.  Aborting."; exit 1; fi
+
+## verify environment is OK
+command -v docker > /dev/null 2>&1 || { echo "ERROR: docker not installed.    Aborting." >&2; exit 1; }
+command -v aws    > /dev/null 2>&1 || { echo "ERROR: aws CLI not installed.   Aborting." >&2; exit 1; }
+command -v gsutil > /dev/null 2>&1 || { echo "ERROR: gsutil not installed.    Aborting." >&2; exit 1; }
+
+## verify if container name is provided as an argument
+if [[ $# -eq 0 ]] ; then
+    echo 'ERROR: missing container name'
+    echo 'usage: docker-container-restore container_name'
+    echo ''
+    exit 1
+fi
+
+## backup date
+BACKUP_DATE="$(date "+%Y-%m-%d")"
+
+## verify that container is running
+RUNNING=$(docker inspect --format="{{ .State.Running }}" $1 2> /dev/null)
+
+if [ $? -eq 1 ]; then
+    echo "ERROR: container: $1 does not exist.  Aborting."
+    exit 3
+fi
+
+if [ "$RUNNING" == "false" ]; then
+    echo "WARNING: container: $1 is not running."
+fi
+
+GHOST=$(docker inspect --format="{{ .State.Ghost }}" $1 2> /dev/null)
+
+if [ "$GHOST" == "true" ]; then
+    echo "ERROR: container: $1 has been ghosted.  Aborting."
+    exit 1
+fi
+
+STARTED=$(docker inspect --format="{{ .State.StartedAt }}" $1)
+NETWORK=$(docker inspect --format="{{ .NetworkSettings.IPAddress }}" $1)
+
+if [ ! -z "$NETWORK" ]; then
+    echo "$1 is running OK. IP: $NETWORK, StartedAt: $STARTED"
+fi
+
+## export docker container
+docker export $1 | gzip > $TMP_STORAGE/$1.gz
+
+## utilize selected storage service to retrieve backup from
+if [ "$SERVICE" == "amazon" ] ; then
+    aws s3 mv $TMP_STORAGE/$1.gz s3://$S3_BUCKET/backup-$BACKUP_DATE/$1.gz 
+
+    CHECK=$(aws s3 ls s3://$S3_BUCKET/backup-$BACKUP_DATE/$1.gz | wc -l)
+
+    if [ $CHECK -eq 0 ] ; then echo "ERROR: backup failed.  Aborting."; exit 1; fi
+else
+    gsutil mv $TMP_STORAGE/$1.gz gs://$GC_BUCKET/backup-$BACKUP_DATE/$1.gz 
+
+    CHECK=$(gsutil stat gs://$GC_BUCKET/backup-$BACKUP_DATE/$1.gz)
+
+    if [ $CHECK -eq 0 ] ; then echo "ERROR: backup failed.  Aborting."; exit 1; fi
+fi
+
+echo "OK"

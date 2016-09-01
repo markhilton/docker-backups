@@ -1,0 +1,10 @@
+#!/bin/bash
+
+## fetch containers
+CONTAINERS=$(docker ps -a | awk '{if(NR>1) print $NF}')
+
+for CONTAINER in $CONTAINERS; do
+    echo "Starting up docker container: $CONTAINER"
+    docker start $CONTAINER
+done
+

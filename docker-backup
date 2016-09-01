@@ -1,0 +1,10 @@
+#!/bin/bash
+
+## fetch containers
+CONTAINERS=$(docker ps -a | awk '{if(NR>1) print $NF}')
+
+for CONTAINER in $CONTAINERS; do
+    echo "Backing up docker container: $CONTAINER"
+    docker-container-backup $CONTAINER
+done
+

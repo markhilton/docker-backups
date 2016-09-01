@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# Inspired by http://gcloud-script-disk-snapshot.blogspot.co.uk/2015/04/gcloud-snapshot-script.html
+#
+# Delete the snapshots older than 3 days
+retention_preiod=3
+removal_date=`date --date="$retention_preiod days ago" +%Y%m%d%H%M%S`
+dt=`date +%Y-%m-%d`
+
+# Delimiter to exclude is "\|"
+exclude_list="NAME"
+all_disks=`gcloud compute disks list |awk '{print $1"="$2}'|grep -v $exclude_list`
+for line in `echo -e $all_disks` ;do
+  zone=`echo $line |awk -F"=" '{print $2}'`
+  disks=`echo $line |awk  -F"=" '{print $1}'`
+  echo "Creating snapshot for: $disks"
+  gcloud compute disks snapshot $disks --zone $zone --snapshot-names "backup--$disks--$dt"
+done
+
+# Code to delete the older snapshots
+# Mention snapshots which you do not want to delete
+exclude_snap=""
+snapshot_list=`gcloud compute snapshots list|grep backup|awk '{print $1}'|grep -v "$exclude_snap"`
+for list in `echo $snapshot_list`;do
+  backup_date=`echo $list |awk -F "--" '{print $2}'`
+  if [ $backup_date -le $removal_date ];then
+    echo "Delete backup: $list"
+    gcloud compute snapshots delete $list -q
+  fi
+done
